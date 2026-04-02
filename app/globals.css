@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900;
+    font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', Arial, sans-serif;
+  }
+}
+
+@layer components {
+  .quiz-table {
+    @apply w-full border-collapse;
+  }
+
+  .quiz-table th,
+  .quiz-table td {
+    @apply border border-gray-300 px-3 py-2 text-sm;
+  }
+
+  .quiz-table th {
+    @apply bg-gray-100 font-semibold text-center;
+  }
+}
