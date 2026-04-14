@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import mammoth from 'mammoth'
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.mjs')
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as string)
   pdfjsLib.GlobalWorkerOptions.workerSrc = ''
 
   const data = new Uint8Array(buffer)
-  const loadingTask = pdfjsLib.getDocument({ data, useWorkerFetch: false, isEvalSupported: false })
+  const loadingTask = pdfjsLib.getDocument({
+    data,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  })
   const pdf = await loadingTask.promise
 
   let text = ''
