@@ -2,7 +2,7 @@
 const nextConfig = {
   webpack: (config, { isServer }) => {
     if (isServer) {
-      config.externals = [...(config.externals || []), 'mammoth']
+      config.externals = [...(config.externals || []), 'mammoth', 'pdfjs-dist']
     }
     return config
   },

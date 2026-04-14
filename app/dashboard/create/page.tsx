@@ -46,17 +46,17 @@ export default function CreatePage() {
   }
 
   const extractText = async (file: File): Promise<string> => {
-    if (file.name.endsWith('.docx')) {
-      const formData = new FormData()
-      formData.append('file', file)
-      const res = await fetch('/api/extract-text', { method: 'POST', body: formData })
-      const data = await res.json()
-      return data.text
-    } else if (file.type === 'application/pdf') {
-      // PDF: テキスト抽出は限定的なためファイル名と案内を返す
-      return `PDFファイル「${file.name}」がアップロードされました。このファイルの内容に基づいて工業簿記の問題を作成してください。`
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch('/api/extract-text', { method: 'POST', body: formData })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'テキスト抽出に失敗しました')
     }
-    return ''
+    if (!data.text || data.text.trim().length === 0) {
+      throw new Error('ファイルからテキストを抽出できませんでした。スキャン画像のPDFは対応していません。')
+    }
+    return data.text
   }
 
   const handleGenerate = async () => {

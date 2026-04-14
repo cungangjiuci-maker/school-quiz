@@ -62,7 +62,20 @@ export async function POST(request: NextRequest) {
 
 JSON形式のみで出力し、余分な説明は不要です。`
 
+  // ログ: Claudeに送るテキストを確認
+  console.log('=== Claude API に送信するテキスト ===')
+  console.log(`文字数: ${content.length}`)
+  console.log('--- テキスト先頭300文字 ---')
+  console.log(content.substring(0, 300))
+  console.log('===================================')
+
   const userPrompt = `以下の授業プリントの内容を基に、工業簿記の小テストを作成してください。
+
+【絶対厳守】
+- 必ず「授業プリント内容」に記載されている情報のみを使って出題すること
+- 授業プリントに含まれていない単元・数値・概念を使った問題は絶対に作成しないこと
+- プリントに記載の数値・勘定科目・計算条件をそのまま使用すること
+- プリントの内容が不十分で問題が作れない場合は、その旨をerrorフィールドに記載すること
 
 【設定】
 - 難易度: ${difficultyLabel}
