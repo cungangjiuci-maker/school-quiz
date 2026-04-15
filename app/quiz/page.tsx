@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { useState } from 'react'
 import { Quiz, StudentAnswer, GradingDetail, Question, JournalEntryAnswer, CalculationBlank, TableData } from '@/types'
 import QuizTaker from '@/components/QuizTaker'
 
@@ -155,55 +154,39 @@ export default function QuizPage() {
   const [submitError, setSubmitError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // SupabaseクライアントはuseEffect内（ブラウザのみ）で初期化
-  const supabaseRef = useRef<SupabaseClient | null>(null)
-
-  useEffect(() => {
-    // ブラウザでのみ実行される
-    import('@/lib/supabase/client')
-      .then(({ createClient }) => {
-        try {
-          supabaseRef.current = createClient()
-        } catch {
-          setError('接続の初期化に失敗しました。ページを再読み込みしてください。')
-        }
-      })
-      .catch(() => {
-        setError('接続モジュールの読み込みに失敗しました。ページを再読み込みしてください。')
-      })
-  }, [])
-
-  // 4桁コードでテストを取得
+  // 4桁コードでテストを取得（サーバーサイドAPI経由）
   const handleCodeSubmit = async () => {
     if (code.length !== 4) { setError('4桁のコードを入力してください'); return }
-    if (!supabaseRef.current) { setError('初期化中です。しばらく待ってから再試行してください。'); return }
     setLoading(true)
     setError('')
 
-    const { data, error: dbError } = await supabaseRef.current
-      .from('quizzes')
-      .select('*')
-      .eq('code', code)
-      .eq('is_active', true)
-      .single()
+    try {
+      const res = await fetch(`/api/quiz?code=${code}`)
+      const data = await res.json()
 
-    if (dbError || !data) {
-      setError('テストが見つかりません。コードを確認してください。')
-    } else {
-      // 【診断ログ】DBから取得したクイズデータを確認
-      console.log('[handleCodeSubmit] クイズ取得成功:', JSON.stringify({
-        id: data.id,
-        title: data.title,
-        questions: data.questions?.map((q: Question) => ({
-          id: q.id,
-          type: q.type,
-          blanks: q.blanks,
-          has_table_data: !!q.table_data,
+      if (!res.ok) {
+        setError(data.error ?? 'テストが見つかりません。コードを確認してください。')
+      } else {
+        // 【診断ログ】取得したクイズデータを確認
+        console.log('[handleCodeSubmit] クイズ取得成功:', JSON.stringify({
+          id: data.id,
+          title: data.title,
+          questions: data.questions?.map((q: Question) => ({
+            id: q.id,
+            type: q.type,
+            blanks: q.blanks,
+            blanks_count: Array.isArray(q.blanks) ? q.blanks.length : 0,
+            has_table_data: !!q.table_data,
+          }))
         }))
-      }))
-      setQuiz(data)
-      setPhase('info')
+        setQuiz(data)
+        setPhase('info')
+      }
+    } catch (e) {
+      console.error('Quiz fetch error:', e)
+      setError('ネットワークエラーが発生しました。再度お試しください。')
     }
+
     setLoading(false)
   }
 
