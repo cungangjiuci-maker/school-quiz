@@ -38,11 +38,13 @@ export async function POST(request: NextRequest) {
 - 問題の数値は必ず整合性が取れていること（答えが割り切れる数値を使う）
 - 解答の数値は必ず検算して正しいことを確認してから出力すること
 
-【表形式問題のJSON出力形式】
-計算問題で表が必要な場合は以下のtable_dataを必ず含めること：
+【計算問題のJSON出力形式 - 絶対厳守】
+計算問題（type: "calculation"）には必ず blanks 配列を含めること。blanks がないと採点できない。
+
+■ 表ありの計算問題（table_data + blanks 両方必須）：
 {
   "type": "calculation",
-  "question_text": "問題文（資料のみ）",
+  "question_text": "問題文",
   "table_data": {
     "title": "総合原価計算表（平均法）（単位：円）",
     "headers": ["区分", "直接材料費", "加工費", "合計"],
@@ -56,7 +58,19 @@ export async function POST(request: NextRequest) {
   },
   "blanks": [
     {"position": "①", "answer": 96000, "type": "number"},
-    {"position": "②", "answer": 14000, "type": "number"}
+    {"position": "②", "answer": 14000, "type": "number"},
+    {"position": "③", "answer": 110000, "type": "number"},
+    {"position": "④", "answer": 384000, "type": "number"},
+    {"position": "⑤", "answer": 406000, "type": "number"}
+  ]
+}
+
+■ 表なしの計算問題（blanks のみ必須）：
+{
+  "type": "calculation",
+  "question_text": "製造間接費配賦差異を計算してください。\n【資料】予定配賦率：@500円/時間、実際操業度：800時間、実際発生額：420,000円\n①製造間接費配賦差異を求めてください（借方/貸方の区別も）",
+  "blanks": [
+    {"position": "①", "answer": 20000, "type": "number"}
   ]
 }
 
@@ -140,7 +154,9 @@ ${content}
 注意事項:
 - 仕訳問題は借方・貸方の合計金額が必ず一致すること（検算必須）
 - 複数行仕訳は answer を配列にする: [{"debit_account":"...","debit_amount":0,"credit_account":"...","credit_amount":0}]
-- 表を使う計算問題は必ず table_data を含めること
+- 計算問題は必ず blanks 配列を含めること（これがないと採点できない・絶対省略禁止）
+- 表を使う計算問題は table_data と blanks の両方を含めること
+- blanks の answer は必ず数値（number型）で設定すること
 - 数値の整合性を必ず検算してから出力すること
 - 合計点数は10点にすること`
 
@@ -164,6 +180,38 @@ ${content}
     }
 
     const quizData = JSON.parse(jsonMatch[0])
+
+    // バリデーション：計算問題に blanks が含まれているか確認・補完
+    if (Array.isArray(quizData.questions)) {
+      quizData.questions = quizData.questions.map((q: { type: string; blanks?: unknown[]; table_data?: { rows?: { values?: string[] }[] } }) => {
+        if (q.type !== 'calculation') return q
+
+        // blanksが配列かつ要素があればOK
+        if (Array.isArray(q.blanks) && q.blanks.length > 0) return q
+
+        // blanksが欠けている場合：table_dataのセルから空欄を自動生成（answerは0で仮置き）
+        if (q.table_data && Array.isArray(q.table_data.rows)) {
+          const positions: string[] = []
+          q.table_data.rows.forEach((row: { values?: string[] }) => {
+            (row.values ?? []).forEach((val: string) => {
+              if (/^[①-⑳]$/.test(val) && !positions.includes(val)) {
+                positions.push(val)
+              }
+            })
+          })
+          if (positions.length > 0) {
+            console.warn(`[generate-quiz] 計算問題のblanksが未設定のため自動生成: ${positions.join(',')}`)
+            q.blanks = positions.map(pos => ({ position: pos, answer: 0, type: 'number' }))
+          }
+        }
+
+        if (!Array.isArray(q.blanks) || q.blanks.length === 0) {
+          console.error('[generate-quiz] 計算問題にblanksが設定されていません。再生成を推奨します。')
+        }
+        return q
+      })
+    }
+
     return NextResponse.json(quizData)
   } catch (error) {
     console.error('Claude API error:', error)

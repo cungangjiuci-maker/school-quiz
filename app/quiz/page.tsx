@@ -57,10 +57,7 @@ function CorrectAnswerDisplay({ question, correctAnswer }: { question: Question;
             ? question.blanks!
             : []
       if (blanks.length === 0) return (
-        <div>
-          <p className="text-xs text-gray-500">（正解データなし）</p>
-          <p className="text-xs text-gray-400 mt-1">ブラウザのコンソールで詳細を確認してください</p>
-        </div>
+        <p className="text-xs text-gray-500">（このクイズの正解データが未設定です。教師に問題を再生成してもらってください）</p>
       )
       return (
         <div className="space-y-2">
