@@ -12,66 +12,77 @@ type Phase = 'code' | 'info' | 'quiz' | 'result'
 
 // ---- 正解表示コンポーネント ----
 function CorrectAnswerDisplay({ question, correctAnswer }: { question: Question; correctAnswer: unknown }) {
-  if (question.type === 'journal_entry') {
-    const rows: JournalEntryAnswer[] = Array.isArray(correctAnswer)
-      ? correctAnswer as JournalEntryAnswer[]
-      : [correctAnswer as JournalEntryAnswer]
-    return (
-      <div className="overflow-x-auto">
-        <table className="border-collapse text-xs w-full">
-          <thead>
-            <tr>
-              {['借方科目', '借方金額', '貸方科目', '貸方金額'].map(h => (
-                <th key={h} className="border border-gray-300 bg-gray-100 px-2 py-1 text-center font-semibold">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i}>
-                <td className="border border-gray-300 px-2 py-1 text-center">{row?.debit_account}</td>
-                <td className="border border-gray-300 px-2 py-1 text-right">{row?.debit_amount?.toLocaleString()}</td>
-                <td className="border border-gray-300 px-2 py-1 text-center">{row?.credit_account}</td>
-                <td className="border border-gray-300 px-2 py-1 text-right">{row?.credit_amount?.toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
-
-  if (question.type === 'calculation') {
-    // correctAnswer が正しい配列でない場合は question.blanks をフォールバックとして使用
-    const blanks: CalculationBlank[] =
-      Array.isArray(correctAnswer) && correctAnswer.length > 0
-        ? (correctAnswer as CalculationBlank[])
-        : Array.isArray(question.blanks) && question.blanks.length > 0
-          ? question.blanks
+  try {
+    if (question?.type === 'journal_entry') {
+      const rows: JournalEntryAnswer[] = Array.isArray(correctAnswer) && correctAnswer.length > 0
+        ? (correctAnswer as JournalEntryAnswer[])
+        : correctAnswer != null
+          ? [correctAnswer as JournalEntryAnswer]
           : []
-    return (
-      <div className="space-y-2">
-        {question.table_data && blanks.length > 0 && (
-          <CorrectAnswerTable tableData={question.table_data} blanks={blanks} />
-        )}
-        <p className="text-xs text-gray-700 leading-relaxed">
-          {blanks.map(b => (
-            `${b.position}：${typeof b.answer === 'number' ? b.answer.toLocaleString() : b.answer}`
-          )).join('　')}
-        </p>
-      </div>
-    )
-  }
+      if (rows.length === 0) return null
+      return (
+        <div className="overflow-x-auto">
+          <table className="border-collapse text-xs w-full">
+            <thead>
+              <tr>
+                {['借方科目', '借方金額', '貸方科目', '貸方金額'].map(h => (
+                  <th key={h} className="border border-gray-300 bg-gray-100 px-2 py-1 text-center font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i}>
+                  <td className="border border-gray-300 px-2 py-1 text-center">{row?.debit_account}</td>
+                  <td className="border border-gray-300 px-2 py-1 text-right">{(row?.debit_amount as number | undefined)?.toLocaleString?.()}</td>
+                  <td className="border border-gray-300 px-2 py-1 text-center">{row?.credit_account}</td>
+                  <td className="border border-gray-300 px-2 py-1 text-right">{(row?.credit_amount as number | undefined)?.toLocaleString?.()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
 
-  if (question.type === 'multiple_choice') {
-    const idx = correctAnswer as number
-    const choice = question.choices?.[idx]
-    return <p className="text-xs text-gray-700">{idx + 1}. {choice}</p>
-  }
+    if (question?.type === 'calculation') {
+      // correctAnswer が正しい配列でない場合は question.blanks をフォールバックとして使用
+      const blanks: CalculationBlank[] =
+        Array.isArray(correctAnswer) && correctAnswer.length > 0
+          ? (correctAnswer as CalculationBlank[])
+          : Array.isArray(question.blanks) && question.blanks.length > 0
+            ? question.blanks
+            : []
+      if (blanks.length === 0) return <p className="text-xs text-gray-500">（正解データなし）</p>
+      return (
+        <div className="space-y-2">
+          {question.table_data != null && (
+            <CorrectAnswerTable tableData={question.table_data} blanks={blanks} />
+          )}
+          <p className="text-xs text-gray-700 leading-relaxed">
+            {blanks.map(b => (
+              `${b?.position ?? ''}：${typeof b?.answer === 'number' ? b.answer.toLocaleString() : (b?.answer ?? '')}`
+            )).join('　')}
+          </p>
+        </div>
+      )
+    }
 
-  if (question.type === 'description') {
-    const keywords = correctAnswer as string[]
-    return <p className="text-xs text-gray-700">キーワード: {keywords?.join('、')}</p>
+    if (question?.type === 'multiple_choice') {
+      const idx = typeof correctAnswer === 'number' ? correctAnswer : -1
+      const choice = question.choices?.[idx]
+      if (idx < 0 || choice == null) return null
+      return <p className="text-xs text-gray-700">{idx + 1}. {choice}</p>
+    }
+
+    if (question?.type === 'description') {
+      const keywords = Array.isArray(correctAnswer) ? (correctAnswer as string[]) : []
+      if (keywords.length === 0) return null
+      return <p className="text-xs text-gray-700">キーワード: {keywords.join('、')}</p>
+    }
+  } catch (e) {
+    console.error('CorrectAnswerDisplay error:', e)
+    return <p className="text-xs text-gray-400">（表示エラー）</p>
   }
 
   return null
@@ -79,24 +90,28 @@ function CorrectAnswerDisplay({ question, correctAnswer }: { question: Question;
 
 function CorrectAnswerTable({ tableData, blanks }: { tableData: TableData; blanks: CalculationBlank[] }) {
   const answerMap: Record<string, string> = {}
-  blanks?.forEach(b => { answerMap[b.position] = typeof b.answer === 'number' ? b.answer.toLocaleString() : String(b.answer) })
+  ;(blanks ?? []).forEach(b => {
+    if (b?.position != null) {
+      answerMap[b.position] = typeof b.answer === 'number' ? b.answer.toLocaleString() : String(b.answer ?? '')
+    }
+  })
 
   return (
     <div className="overflow-x-auto">
-      <p className="text-xs text-gray-500 mb-1">{tableData.title}</p>
+      <p className="text-xs text-gray-500 mb-1">{tableData?.title}</p>
       <table className="border-collapse text-xs w-full">
         <thead>
           <tr>
-            {tableData.headers.map((h, i) => (
+            {(tableData?.headers ?? []).map((h, i) => (
               <th key={i} className="border-2 border-gray-600 bg-gray-200 px-2 py-1 text-center font-bold whitespace-nowrap">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {tableData.rows.map((row, ri) => (
-            <tr key={ri} className={row.label.includes('合計') || row.label.includes('完成品') ? 'bg-gray-50 font-semibold' : ''}>
-              <td className="border-2 border-gray-600 px-2 py-1 whitespace-nowrap">{row.label}</td>
-              {row.values.map((val, vi) => {
+          {(tableData?.rows ?? []).map((row, ri) => (
+            <tr key={ri} className={row?.label?.includes('合計') || row?.label?.includes('完成品') ? 'bg-gray-50 font-semibold' : ''}>
+              <td className="border-2 border-gray-600 px-2 py-1 whitespace-nowrap">{row?.label}</td>
+              {(row?.values ?? []).map((val, vi) => {
                 const isBlank = /^[①-⑳]$/.test(val)
                 return (
                   <td key={vi} className={`border-2 border-gray-600 px-2 py-1 text-right whitespace-nowrap ${isBlank ? 'bg-green-50' : ''}`}>
@@ -132,6 +147,7 @@ export default function QuizPage() {
   const [score, setScore] = useState(0)
   const [gradingDetails, setGradingDetails] = useState<GradingDetail[]>([])
   const [error, setError] = useState('')
+  const [submitError, setSubmitError] = useState('')
   const [loading, setLoading] = useState(false)
 
   // SupabaseクライアントはuseEffect内（ブラウザのみ）で初期化
@@ -187,24 +203,35 @@ export default function QuizPage() {
   const handleSubmit = async (submittedAnswers: Record<string, StudentAnswer>) => {
     if (!quiz) return
     setLoading(true)
+    setSubmitError('')
 
-    const res = await fetch('/api/submit-quiz', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        quiz_id: quiz.id,
-        student_name: studentName,
-        student_number: studentNumber,
-        answers: submittedAnswers,
-        questions: quiz.questions,
-      }),
-    })
+    try {
+      const res = await fetch('/api/submit-quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quiz_id: quiz.id,
+          student_name: studentName,
+          student_number: studentNumber,
+          answers: submittedAnswers,
+          questions: quiz.questions,
+        }),
+      })
 
-    const data = await res.json()
-    setScore(data.score)
-    setGradingDetails(data.grading_details)
-    setPhase('result')
-    setLoading(false)
+      if (!res.ok) {
+        throw new Error(`サーバーエラー: ${res.status}`)
+      }
+
+      const data = await res.json()
+      setScore(data.score ?? 0)
+      setGradingDetails(Array.isArray(data.grading_details) ? data.grading_details : [])
+      setPhase('result')
+    } catch (e) {
+      setSubmitError('採点中にエラーが発生しました。もう一度「提出する」を押してください。')
+      console.error('Submit error:', e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   // ① 4桁コード入力
@@ -217,9 +244,10 @@ export default function QuizPage() {
 
           <div className="mb-6">
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               value={code}
-              onChange={e => setCode(e.target.value.slice(0, 4))}
+              onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
               className="w-full text-4xl font-bold text-center border-2 border-gray-300 rounded-xl py-4 focus:outline-none focus:border-blue-500 tracking-widest"
               placeholder="0000"
               maxLength={4}
@@ -252,7 +280,8 @@ export default function QuizPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">出席番号</label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 value={studentNumber}
                 onChange={e => setStudentNumber(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -287,12 +316,19 @@ export default function QuizPage() {
   // ③ テスト回答
   if (phase === 'quiz' && quiz) {
     return (
-      <QuizTaker
-        quiz={quiz}
-        accountList={ACCOUNT_LIST}
-        onSubmit={handleSubmit}
-        loading={loading}
-      />
+      <>
+        <QuizTaker
+          quiz={quiz}
+          accountList={ACCOUNT_LIST}
+          onSubmit={handleSubmit}
+          loading={loading}
+        />
+        {submitError && (
+          <div className="fixed bottom-4 left-4 right-4 bg-red-600 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg z-50 text-center">
+            {submitError}
+          </div>
+        )}
+      </>
     )
   }
 

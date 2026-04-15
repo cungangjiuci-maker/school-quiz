@@ -56,10 +56,11 @@ function QuizTable({
                           <input
                             type="text"
                             inputMode={blankTypeMap[val] === 'number' ? 'numeric' : 'text'}
-                            value={blanks[val] || ''}
+                            value={blanks[val] ?? ''}
                             onChange={e => onInput(val, e.target.value)}
-                            className="w-24 border border-blue-300 rounded px-1 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                            className="w-20 border border-blue-300 rounded px-2 py-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
                             placeholder="0"
+                            autoComplete="off"
                           />
                         </div>
                       ) : (
@@ -292,10 +293,11 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
                       <input
                         type="text"
                         inputMode={blank.type === 'number' ? 'numeric' : 'text'}
-                        value={answer.blanks?.[blank.position] || ''}
+                        value={answer?.blanks?.[blank.position] ?? ''}
                         onChange={e => updateBlank(q.id, blank.position, e.target.value)}
-                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
                         placeholder={blank.type === 'number' ? '数値を入力' : '答えを入力'}
+                        autoComplete="off"
                       />
                       {blank.type === 'number' && <span className="text-sm text-gray-500">円</span>}
                     </div>
@@ -338,10 +340,10 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <h3 className="font-medium text-gray-700 mb-3 text-sm">答えを記述してください</h3>
             <textarea
-              value={answer.text || ''}
+              value={answer?.text ?? ''}
               onChange={e => updateAnswer(q.id, { text: e.target.value })}
-              rows={3}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={4}
+              className="w-full border border-gray-300 rounded-lg px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="答えを入力してください"
             />
           </div>
