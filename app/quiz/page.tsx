@@ -46,14 +46,22 @@ function CorrectAnswerDisplay({ question, correctAnswer }: { question: Question;
     }
 
     if (question?.type === 'calculation') {
+      // 【診断ログ】正解表示データを確認
+      console.log('[CorrectAnswerDisplay] calculation:', JSON.stringify({ correctAnswer, question_blanks: question?.blanks }))
+
       // correctAnswer が正しい配列でない場合は question.blanks をフォールバックとして使用
       const blanks: CalculationBlank[] =
         Array.isArray(correctAnswer) && correctAnswer.length > 0
           ? (correctAnswer as CalculationBlank[])
-          : Array.isArray(question.blanks) && question.blanks.length > 0
-            ? question.blanks
+          : Array.isArray(question?.blanks) && (question.blanks?.length ?? 0) > 0
+            ? question.blanks!
             : []
-      if (blanks.length === 0) return <p className="text-xs text-gray-500">（正解データなし）</p>
+      if (blanks.length === 0) return (
+        <div>
+          <p className="text-xs text-gray-500">（正解データなし）</p>
+          <p className="text-xs text-gray-400 mt-1">ブラウザのコンソールで詳細を確認してください</p>
+        </div>
+      )
       return (
         <div className="space-y-2">
           {question.table_data != null && (
@@ -185,6 +193,17 @@ export default function QuizPage() {
     if (dbError || !data) {
       setError('テストが見つかりません。コードを確認してください。')
     } else {
+      // 【診断ログ】DBから取得したクイズデータを確認
+      console.log('[handleCodeSubmit] クイズ取得成功:', JSON.stringify({
+        id: data.id,
+        title: data.title,
+        questions: data.questions?.map((q: Question) => ({
+          id: q.id,
+          type: q.type,
+          blanks: q.blanks,
+          has_table_data: !!q.table_data,
+        }))
+      }))
       setQuiz(data)
       setPhase('info')
     }
@@ -204,6 +223,15 @@ export default function QuizPage() {
     if (!quiz) return
     setLoading(true)
     setSubmitError('')
+
+    // 【診断ログ】送信データを確認
+    const calcQuestions = quiz.questions.filter(q => q.type === 'calculation')
+    console.log('[handleSubmit] 計算問題のblanksデータ:', JSON.stringify(calcQuestions.map(q => ({ id: q.id, blanks: q.blanks, has_table: !!q.table_data }))))
+    console.log('[handleSubmit] 送信する回答:', JSON.stringify(
+      Object.entries(submittedAnswers)
+        .filter(([, v]) => v.type === 'calculation')
+        .map(([k, v]) => ({ questionId: k, answer: v }))
+    ))
 
     try {
       const res = await fetch('/api/submit-quiz', {

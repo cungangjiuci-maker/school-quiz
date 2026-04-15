@@ -3,6 +3,15 @@ import { createClient } from '@/lib/supabase/server'
 import { Question, StudentAnswer, GradingDetail, JournalEntryAnswer } from '@/types'
 
 function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail {
+  // 【診断ログ】採点対象の問題データを出力
+  if (question.type === 'calculation') {
+    console.log(`[gradeQuestion] 計算問題 id=${question.id}`, JSON.stringify({
+      blanks: question.blanks,
+      table_data_exists: !!question.table_data,
+      answer_received: answer,
+    }))
+  }
+
   const base: Omit<GradingDetail, 'is_correct' | 'earned_points'> = {
     question_id: question.id,
     max_points: question.points,
@@ -33,7 +42,16 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
   }
 
   if (question.type === 'calculation' && answer.type === 'calculation') {
-    if (!question.blanks) return { ...base, is_correct: false, earned_points: 0 }
+    // blanksが未定義または空の場合：correct_answerを明示的にセットして早期リターン
+    if (!question.blanks || !Array.isArray(question.blanks) || question.blanks.length === 0) {
+      console.warn(`[gradeQuestion] 計算問題 id=${question.id} のblanksが未定義または空です`)
+      return {
+        ...base,
+        correct_answer: question.blanks ?? null,
+        is_correct: false,
+        earned_points: 0,
+      }
+    }
 
     const userBlanks = answer.blanks || {}
     const totalBlanks = question.blanks.length
@@ -41,6 +59,7 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
 
     question.blanks.forEach(blank => {
       const userAnswer = userBlanks[blank.position]
+      console.log(`[gradeQuestion] id=${question.id} 空欄${blank.position}: 正解=${blank.answer}, 生徒回答="${userAnswer}", parseInt=${parseInt(userAnswer)}`)
       if (blank.type === 'number') {
         if (parseInt(userAnswer) === blank.answer) correctCount++
       } else {
@@ -52,6 +71,8 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
     const earnedPoints = totalBlanks > 0
       ? Math.round((correctCount / totalBlanks) * question.points)
       : 0
+
+    console.log(`[gradeQuestion] id=${question.id} 結果: ${correctCount}/${totalBlanks}正解, isCorrect=${isCorrect}, earnedPoints=${earnedPoints}`)
 
     return {
       ...base,
@@ -102,12 +123,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '問題データが不正です' }, { status: 400 })
   }
 
+  // 【診断ログ】受信データを確認
+  console.log('[submit-quiz] 受信questions(計算問題):', JSON.stringify(
+    questions.filter((q: Question) => q.type === 'calculation').map((q: Question) => ({
+      id: q.id,
+      id_type: typeof q.id,
+      blanks: q.blanks,
+      blanks_is_array: Array.isArray(q.blanks),
+      blanks_length: Array.isArray(q.blanks) ? q.blanks.length : 'N/A',
+    }))
+  ))
+  console.log('[submit-quiz] 受信answers keys:', Object.keys(answers ?? {}))
+  console.log('[submit-quiz] 受信answers(計算):', JSON.stringify(
+    Object.entries(answers ?? {}).filter(([, v]) => (v as StudentAnswer).type === 'calculation')
+  ))
+
   // 採点（Supabase不要・クラッシュしない）
   let gradingDetails: GradingDetail[]
   try {
     gradingDetails = questions.map((q: Question) => {
       // answersのキーは文字列（JSON化により）、q.idは数値なので両方試す
       const answer = answers?.[String(q.id)] ?? answers?.[q.id as unknown as string] ?? { type: q.type }
+      console.log(`[submit-quiz] 問${q.id}(${q.type}) answer取得: key="${String(q.id)}", found=${answer !== undefined && (answer as StudentAnswer).type !== q.type ? 'yes' : answer !== undefined ? 'yes(default?)' : 'no'}`)
       return gradeQuestion(q, answer as StudentAnswer)
     })
   } catch (e) {
