@@ -1,9 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect, useRef } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { Quiz, StudentAnswer, GradingDetail, Question, JournalEntryAnswer, CalculationBlank, TableData } from '@/types'
 import QuizTaker from '@/components/QuizTaker'
+
+// SSRを完全に無効化
+export const dynamic = 'force-dynamic'
 
 type Phase = 'code' | 'info' | 'quiz' | 'result'
 
@@ -42,11 +45,9 @@ function CorrectAnswerDisplay({ question, correctAnswer }: { question: Question;
     const blanks = correctAnswer as CalculationBlank[]
     return (
       <div className="space-y-2">
-        {/* 表形式の場合は表を表示 */}
         {question.table_data && (
           <CorrectAnswerTable tableData={question.table_data} blanks={blanks} />
         )}
-        {/* 空欄の正解一覧 */}
         <p className="text-xs text-gray-700 leading-relaxed">
           {blanks?.map(b => (
             `${b.position}：${typeof b.answer === 'number' ? b.answer.toLocaleString() : b.answer}`
@@ -122,20 +123,29 @@ export default function QuizPage() {
   const [studentName, setStudentName] = useState('')
   const [studentNumber, setStudentNumber] = useState('')
   const [quiz, setQuiz] = useState<Quiz | null>(null)
-  const [, setAnswers] = useState<Record<string, StudentAnswer>>({})
   const [score, setScore] = useState(0)
   const [gradingDetails, setGradingDetails] = useState<GradingDetail[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // SupabaseクライアントはuseEffect内（ブラウザのみ）で初期化
+  const supabaseRef = useRef<SupabaseClient | null>(null)
+
+  useEffect(() => {
+    // ブラウザでのみ実行される
+    import('@/lib/supabase/client').then(({ createClient }) => {
+      supabaseRef.current = createClient()
+    })
+  }, [])
+
+  // 4桁コードでテストを取得
   const handleCodeSubmit = async () => {
     if (code.length !== 4) { setError('4桁のコードを入力してください'); return }
+    if (!supabaseRef.current) { setError('初期化中です。しばらく待ってから再試行してください。'); return }
     setLoading(true)
     setError('')
 
-    // createClient() はブラウザのイベントハンドラ内でのみ呼び出す（SSR回避）
-    const supabase = createClient()
-    const { data, error: dbError } = await supabase
+    const { data, error: dbError } = await supabaseRef.current
       .from('quizzes')
       .select('*')
       .eq('code', code)
@@ -151,6 +161,7 @@ export default function QuizPage() {
     setLoading(false)
   }
 
+  // 氏名・出席番号を確認してテスト開始
   const handleInfoSubmit = () => {
     if (!studentName.trim()) { setError('氏名を入力してください'); return }
     if (!studentNumber.trim()) { setError('出席番号を入力してください'); return }
@@ -158,9 +169,9 @@ export default function QuizPage() {
     setPhase('quiz')
   }
 
+  // 解答を提出して採点
   const handleSubmit = async (submittedAnswers: Record<string, StudentAnswer>) => {
     if (!quiz) return
-    setAnswers(submittedAnswers)
     setLoading(true)
 
     const res = await fetch('/api/submit-quiz', {
@@ -182,6 +193,7 @@ export default function QuizPage() {
     setLoading(false)
   }
 
+  // ① 4桁コード入力
   if (phase === 'code') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -214,6 +226,7 @@ export default function QuizPage() {
     )
   }
 
+  // ② 氏名・出席番号入力
   if (phase === 'info') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -257,6 +270,7 @@ export default function QuizPage() {
     )
   }
 
+  // ③ テスト回答
   if (phase === 'quiz' && quiz) {
     return (
       <QuizTaker
@@ -268,6 +282,7 @@ export default function QuizPage() {
     )
   }
 
+  // ④ 結果表示
   if (phase === 'result' && quiz) {
     const percentage = Math.round((score / quiz.total_points) * 100)
     return (
