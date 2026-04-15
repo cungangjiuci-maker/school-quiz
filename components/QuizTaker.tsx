@@ -54,12 +54,13 @@ function QuizTable({
                         <div className="flex items-center gap-1 justify-end">
                           <span className="text-xs font-bold text-blue-700">{val}</span>
                           <input
+                            key={val}
                             type="text"
                             inputMode={blankTypeMap[val] === 'number' ? 'numeric' : 'text'}
                             value={blanks[val] ?? ''}
                             onChange={e => onInput(val, e.target.value)}
-                            className="w-20 border border-blue-300 rounded px-2 py-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                            placeholder="0"
+                            placeholder={val}
+                            style={{ border: '2px solid #333', padding: '6px', fontSize: '14px', width: '80px', backgroundColor: 'white', textAlign: 'right' }}
                           />
                         </div>
                       ) : (
@@ -79,7 +80,7 @@ function QuizTable({
 
 export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Props) {
   // 仕訳・選択・記述の回答state
-  const [answers, setAnswers] = useState<Record<string, StudentAnswer>>(() => {
+  const [studentAnswers, setStudentAnswers] = useState<Record<string, StudentAnswer>>(() => {
     const initial: Record<string, StudentAnswer> = {}
     quiz.questions.forEach(q => {
       const key = String(q.id)
@@ -97,52 +98,51 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
     return initial
   })
 
-  // 計算問題の空欄state：calcBlanks[問題id][空欄位置] = 入力値
-  // シンプルなフラット構造で確実に動作させる
-  const [calcBlanks, setCalcBlanks] = useState<Record<string, Record<string, string>>>({})
+  // 計算問題専用state: answers[question.id][blank.position] = 入力値
+  const [answers, setAnswers] = useState<Record<string, Record<string, string>>>({})
 
   const [currentQ, setCurrentQ] = useState(0)
 
-  const updateAnswer = (qId: number, update: Partial<StudentAnswer>) => {
+  const updateStudentAnswer = (qId: number, update: Partial<StudentAnswer>) => {
     const key = String(qId)
-    setAnswers(prev => ({ ...prev, [key]: { ...prev[key], ...update } }))
+    setStudentAnswers(prev => ({ ...prev, [key]: { ...prev[key], ...update } }))
   }
 
   const addJournalRow = (qId: number) => {
-    const current = answers[String(qId)]
+    const current = studentAnswers[String(qId)]
     if (current?.type !== 'journal_entry') return
-    updateAnswer(qId, {
+    updateStudentAnswer(qId, {
       rows: [...(current.rows || []), { debit_account: '', debit_amount: '', credit_account: '', credit_amount: '' }],
     })
   }
 
   const removeJournalRow = (qId: number, rowIndex: number) => {
-    const current = answers[String(qId)]
+    const current = studentAnswers[String(qId)]
     if (current?.type !== 'journal_entry') return
     const rows = (current.rows || []).filter((_, i) => i !== rowIndex)
-    updateAnswer(qId, { rows })
+    updateStudentAnswer(qId, { rows })
   }
 
   const updateJournalRow = (qId: number, rowIndex: number, field: keyof JournalEntryRow, value: string) => {
-    const current = answers[String(qId)]
+    const current = studentAnswers[String(qId)]
     if (current?.type !== 'journal_entry') return
     const rows = [...(current.rows || [])]
     rows[rowIndex] = { ...rows[rowIndex], [field]: value }
-    updateAnswer(qId, { rows })
+    updateStudentAnswer(qId, { rows })
   }
 
   const q = quiz.questions[currentQ]
-  const answer = q ? answers[String(q.id)] : undefined
+  const answer = q ? studentAnswers[String(q.id)] : undefined
   const isLast = currentQ === quiz.questions.length - 1
 
   const handleSubmitAll = () => {
-    // 計算問題のcalcBlanksをStudentAnswer形式に変換してマージ
-    const finalAnswers: Record<string, StudentAnswer> = { ...answers }
-    quiz.questions.forEach(q => {
-      if (q.type === 'calculation') {
-        finalAnswers[String(q.id)] = {
+    // 計算問題のanswersをStudentAnswer形式に変換してマージ
+    const finalAnswers: Record<string, StudentAnswer> = { ...studentAnswers }
+    quiz.questions.forEach(question => {
+      if (question.type === 'calculation') {
+        finalAnswers[String(question.id)] = {
           type: 'calculation',
-          blanks: calcBlanks[String(q.id)] ?? {},
+          blanks: answers[question.id] ?? {},
         }
       }
     })
@@ -267,20 +267,20 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
           </div>
         )}
 
-        {/* 計算問題 */}
+        {/* 計算問題 ― answers[question.id][blank.position] で直接管理 */}
         {q.type === 'calculation' && (
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
             {/* 簿記表あり */}
             {q.table_data && (
               <QuizTable
                 data={q.table_data}
-                blanks={calcBlanks[String(q.id)] ?? {}}
-                onInput={(pos, val) =>
-                  setCalcBlanks(prev => ({
+                blanks={answers[q.id] ?? {}}
+                onInput={(pos, val) => {
+                  setAnswers(prev => ({
                     ...prev,
-                    [String(q.id)]: { ...(prev[String(q.id)] ?? {}), [pos]: val },
+                    [q.id]: { ...(prev[q.id] || {}), [pos]: val },
                   }))
-                }
+                }}
                 blankDefs={q.blanks ?? []}
               />
             )}
@@ -288,25 +288,33 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
             {!q.table_data && (q.blanks ?? []).length > 0 && (
               <>
                 <h3 className="font-medium text-gray-700 text-sm">空欄を埋めてください</h3>
-                <div className="space-y-3">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {(q.blanks ?? []).map(blank => (
-                    <div key={blank.position} className="flex items-center gap-3">
-                      <span className="font-bold text-blue-700 w-6">{blank.position}</span>
+                    <div key={blank.position} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontWeight: 'bold', color: '#1d4ed8', minWidth: '24px' }}>
+                        {blank.position}
+                      </span>
                       <input
+                        key={blank.position}
                         type="text"
-                        inputMode={blank.type === 'number' ? 'numeric' : 'text'}
-                        value={calcBlanks[String(q.id)]?.[blank.position] ?? ''}
-                        onChange={e => {
+                        inputMode="numeric"
+                        value={answers[q.id]?.[blank.position] ?? ''}
+                        onChange={(e) => {
                           const val = e.target.value
-                          setCalcBlanks(prev => ({
+                          setAnswers(prev => ({
                             ...prev,
-                            [String(q.id)]: { ...(prev[String(q.id)] ?? {}), [blank.position]: val },
+                            [q.id]: {
+                              ...(prev[q.id] || {}),
+                              [blank.position]: val,
+                            },
                           }))
                         }}
-                        className="flex-1 border-2 border-gray-300 rounded-lg px-3 py-3 text-base focus:outline-none focus:border-blue-500"
-                        placeholder={blank.type === 'number' ? '数値を入力' : '答えを入力'}
+                        placeholder={blank.position}
+                        style={{ border: '2px solid #333', padding: '8px', fontSize: '16px', width: '100%', backgroundColor: 'white' }}
                       />
-                      {blank.type === 'number' && <span className="text-sm text-gray-500">円</span>}
+                      {blank.type === 'number' && (
+                        <span style={{ fontSize: '14px', color: '#6b7280' }}>円</span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -332,7 +340,7 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
                     name={`q-${q.id}`}
                     value={i}
                     checked={answer.selected === i}
-                    onChange={() => updateAnswer(q.id, { selected: i })}
+                    onChange={() => updateStudentAnswer(q.id, { selected: i })}
                     className="text-blue-600"
                   />
                   <span className="text-sm text-gray-800">{i + 1}. {choice}</span>
@@ -347,8 +355,8 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <h3 className="font-medium text-gray-700 mb-3 text-sm">答えを記述してください</h3>
             <textarea
-              value={answers[String(q.id)]?.text ?? ''}
-              onChange={e => updateAnswer(q.id, { text: e.target.value })}
+              value={studentAnswers[String(q.id)]?.text ?? ''}
+              onChange={e => updateStudentAnswer(q.id, { text: e.target.value })}
               rows={4}
               className="w-full border-2 border-gray-300 rounded-lg px-3 py-3 text-base focus:outline-none focus:border-blue-500"
               placeholder="答えを入力してください"
