@@ -104,6 +104,21 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
     setAnswers(prev => ({ ...prev, [qId]: { ...prev[qId], ...update } }))
   }
 
+  // 計算問題の空欄を更新する専用関数（最新stateを参照してクロージャ古参照を回避）
+  const updateBlank = (qId: number, position: string, value: string) => {
+    setAnswers(prev => {
+      const current = prev[qId]
+      if (!current) return prev
+      return {
+        ...prev,
+        [qId]: {
+          ...current,
+          blanks: { ...(current.blanks ?? {}), [position]: value },
+        },
+      }
+    })
+  }
+
   const addJournalRow = (qId: number) => {
     const current = answers[qId]
     if (current.type !== 'journal_entry') return
@@ -259,9 +274,7 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
               <QuizTable
                 data={q.table_data}
                 blanks={answer.blanks || {}}
-                onInput={(pos, val) => updateAnswer(q.id, {
-                  blanks: { ...answer.blanks, [pos]: val }
-                })}
+                onInput={(pos, val) => updateBlank(q.id, pos, val)}
                 blankDefs={q.blanks || []}
               />
             )}
@@ -276,9 +289,7 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
                       <input
                         type={blank.type === 'number' ? 'number' : 'text'}
                         value={answer.blanks?.[blank.position] || ''}
-                        onChange={e => updateAnswer(q.id, {
-                          blanks: { ...answer.blanks, [blank.position]: e.target.value }
-                        })}
+                        onChange={e => updateBlank(q.id, blank.position, e.target.value)}
                         className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         placeholder={blank.type === 'number' ? '数値を入力' : '答えを入力'}
                       />

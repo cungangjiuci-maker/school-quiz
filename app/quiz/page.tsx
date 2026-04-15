@@ -42,14 +42,15 @@ function CorrectAnswerDisplay({ question, correctAnswer }: { question: Question;
   }
 
   if (question.type === 'calculation') {
-    const blanks = correctAnswer as CalculationBlank[]
+    // correctAnswer が配列でない場合は [] として扱う
+    const blanks: CalculationBlank[] = Array.isArray(correctAnswer) ? correctAnswer : []
     return (
       <div className="space-y-2">
-        {question.table_data && (
+        {question.table_data && blanks.length > 0 && (
           <CorrectAnswerTable tableData={question.table_data} blanks={blanks} />
         )}
         <p className="text-xs text-gray-700 leading-relaxed">
-          {blanks?.map(b => (
+          {blanks.map(b => (
             `${b.position}：${typeof b.answer === 'number' ? b.answer.toLocaleString() : b.answer}`
           )).join('　')}
         </p>
