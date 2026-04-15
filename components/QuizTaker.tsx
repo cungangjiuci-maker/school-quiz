@@ -31,7 +31,7 @@ function QuizTable({
       <table className="border-collapse text-sm w-full">
         <thead>
           <tr>
-            {data.headers.map((h, i) => (
+            {(data.headers ?? []).map((h, i) => (
               <th key={i} className="border-2 border-gray-700 bg-gray-200 px-2 py-1.5 text-center text-xs font-bold whitespace-nowrap">
                 {h}
               </th>
@@ -39,14 +39,14 @@ function QuizTable({
           </tr>
         </thead>
         <tbody>
-          {data.rows.map((row, ri) => {
+          {(data.rows ?? []).map((row, ri) => {
             const isTotal = row.label.includes('合計') || row.label.includes('完成品')
             return (
               <tr key={ri} className={isTotal ? 'bg-gray-50 font-semibold' : ''}>
                 <td className="border-2 border-gray-700 px-2 py-1.5 text-left whitespace-nowrap text-xs font-medium">
                   {row.label}
                 </td>
-                {row.values.map((val, vi) => {
+                {(row.values ?? []).map((val, vi) => {
                   const isBlank = /^[①-⑳]$/.test(val)
                   return (
                     <td key={vi} className={`border-2 border-gray-700 px-1 py-1 text-right ${isBlank ? 'bg-yellow-50' : ''}`}>
@@ -54,7 +54,8 @@ function QuizTable({
                         <div className="flex items-center gap-1 justify-end">
                           <span className="text-xs font-bold text-blue-700">{val}</span>
                           <input
-                            type={blankTypeMap[val] === 'number' ? 'number' : 'text'}
+                            type="text"
+                            inputMode={blankTypeMap[val] === 'number' ? 'numeric' : 'text'}
                             value={blanks[val] || ''}
                             onChange={e => onInput(val, e.target.value)}
                             className="w-24 border border-blue-300 rounded px-1 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
@@ -216,7 +217,8 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
                       </td>
                       <td className="border border-gray-300 p-1">
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           value={row.debit_amount}
                           onChange={e => updateJournalRow(q.id, rowIndex, 'debit_amount', e.target.value)}
                           className="w-full text-xs text-right border-0 focus:ring-0 focus:outline-none"
@@ -235,7 +237,8 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
                       </td>
                       <td className="border border-gray-300 p-1">
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           value={row.credit_amount}
                           onChange={e => updateJournalRow(q.id, rowIndex, 'credit_amount', e.target.value)}
                           className="w-full text-xs text-right border-0 focus:ring-0 focus:outline-none"
@@ -287,7 +290,8 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
                     <div key={i} className="flex items-center gap-3">
                       <span className="font-bold text-blue-700 w-6">{blank.position}</span>
                       <input
-                        type={blank.type === 'number' ? 'number' : 'text'}
+                        type="text"
+                        inputMode={blank.type === 'number' ? 'numeric' : 'text'}
                         value={answer.blanks?.[blank.position] || ''}
                         onChange={e => updateBlank(q.id, blank.position, e.target.value)}
                         className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"

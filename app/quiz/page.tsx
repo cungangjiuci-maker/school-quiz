@@ -42,8 +42,13 @@ function CorrectAnswerDisplay({ question, correctAnswer }: { question: Question;
   }
 
   if (question.type === 'calculation') {
-    // correctAnswer が配列でない場合は [] として扱う
-    const blanks: CalculationBlank[] = Array.isArray(correctAnswer) ? correctAnswer : []
+    // correctAnswer が正しい配列でない場合は question.blanks をフォールバックとして使用
+    const blanks: CalculationBlank[] =
+      Array.isArray(correctAnswer) && correctAnswer.length > 0
+        ? (correctAnswer as CalculationBlank[])
+        : Array.isArray(question.blanks) && question.blanks.length > 0
+          ? question.blanks
+          : []
     return (
       <div className="space-y-2">
         {question.table_data && blanks.length > 0 && (
@@ -134,9 +139,17 @@ export default function QuizPage() {
 
   useEffect(() => {
     // ブラウザでのみ実行される
-    import('@/lib/supabase/client').then(({ createClient }) => {
-      supabaseRef.current = createClient()
-    })
+    import('@/lib/supabase/client')
+      .then(({ createClient }) => {
+        try {
+          supabaseRef.current = createClient()
+        } catch {
+          setError('接続の初期化に失敗しました。ページを再読み込みしてください。')
+        }
+      })
+      .catch(() => {
+        setError('接続モジュールの読み込みに失敗しました。ページを再読み込みしてください。')
+      })
   }, [])
 
   // 4桁コードでテストを取得
