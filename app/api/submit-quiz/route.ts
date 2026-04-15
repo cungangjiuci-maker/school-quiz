@@ -15,7 +15,6 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
     const rawAnswer = question.answer as JournalEntryAnswer | JournalEntryAnswer[] | undefined
     const correctAnswers: JournalEntryAnswer[] = Array.isArray(rawAnswer) ? rawAnswer : rawAnswer ? [rawAnswer] : []
 
-    // 各正解行が生徒の回答に含まれているかチェック
     const isCorrect = correctAnswers.length > 0 && correctAnswers.every(correct => {
       return rows.some(row =>
         row.debit_account === correct.debit_account &&
@@ -50,7 +49,6 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
     })
 
     const isCorrect = correctCount === totalBlanks
-    // 部分点: 全問正解のみ満点、それ以外は部分的に点数
     const earnedPoints = totalBlanks > 0
       ? Math.round((correctCount / totalBlanks) * question.points)
       : 0
@@ -74,7 +72,6 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
   }
 
   if (question.type === 'description' && answer.type === 'description') {
-    // キーワードマッチで部分採点
     const keywords = question.keywords || []
     if (keywords.length === 0) {
       return { ...base, is_correct: false, earned_points: 0 }
@@ -90,54 +87,90 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
 }
 
 export async function POST(request: NextRequest) {
-  const { quiz_id, student_name, student_number, answers, questions } = await request.json()
+  let body: { quiz_id?: string; student_name?: string; student_number?: string; answers?: Record<string, StudentAnswer>; questions?: Question[] }
 
-  const gradingDetails: GradingDetail[] = questions.map((q: Question) =>
-    gradeQuestion(q, answers[q.id] || { type: q.type })
-  )
+  try {
+    body = await request.json()
+  } catch (e) {
+    console.error('Request parse error:', e)
+    return NextResponse.json({ error: 'リクエストの解析に失敗しました' }, { status: 400 })
+  }
+
+  const { quiz_id, student_name, student_number, answers, questions } = body
+
+  if (!questions || !Array.isArray(questions)) {
+    return NextResponse.json({ error: '問題データが不正です' }, { status: 400 })
+  }
+
+  // 採点（Supabase不要・クラッシュしない）
+  let gradingDetails: GradingDetail[]
+  try {
+    gradingDetails = questions.map((q: Question) => {
+      // answersのキーは文字列（JSON化により）、q.idは数値なので両方試す
+      const answer = answers?.[String(q.id)] ?? answers?.[q.id as unknown as string] ?? { type: q.type }
+      return gradeQuestion(q, answer as StudentAnswer)
+    })
+  } catch (e) {
+    console.error('Grading error:', e)
+    return NextResponse.json({ error: '採点処理中にエラーが発生しました: ' + String(e) }, { status: 500 })
+  }
 
   const score = gradingDetails.reduce((sum, d) => sum + d.earned_points, 0)
   const totalPoints = questions.reduce((sum: number, q: Question) => sum + q.points, 0)
 
-  const supabase = await createClient()
+  // Supabaseへの保存（失敗しても採点結果は返す）
+  try {
+    const supabase = await createClient()
 
-  // 生徒を作成または取得
-  let studentId: string
-  const { data: existingStudent } = await supabase
-    .from('students')
-    .select('id')
-    .eq('student_number', student_number)
-    .eq('name', student_name)
-    .single()
-
-  if (existingStudent) {
-    studentId = existingStudent.id
-  } else {
-    const { data: newStudent, error: studentError } = await supabase
+    // 生徒を作成または取得
+    let studentId: string | null = null
+    const { data: existingStudent, error: findError } = await supabase
       .from('students')
-      .insert({ name: student_name, student_number })
-      .select()
+      .select('id')
+      .eq('student_number', student_number)
+      .eq('name', student_name)
       .single()
-    if (studentError || !newStudent) {
-      return NextResponse.json({ error: '生徒情報の保存に失敗しました' }, { status: 500 })
+
+    if (findError) {
+      console.log('Student lookup failed (may not exist yet):', findError.message)
     }
-    studentId = newStudent.id
-  }
 
-  // 回答を保存
-  const { error: answerError } = await supabase.from('answers').insert({
-    quiz_id,
-    student_id: studentId,
-    student_name,
-    student_number,
-    answers,
-    score,
-    total_points: totalPoints,
-    grading_details: gradingDetails,
-  })
+    if (existingStudent) {
+      studentId = existingStudent.id
+    } else {
+      const { data: newStudent, error: insertError } = await supabase
+        .from('students')
+        .insert({ name: student_name, student_number })
+        .select()
+        .single()
 
-  if (answerError) {
-    console.error('Answer save error:', answerError)
+      if (insertError || !newStudent) {
+        console.error('Student insert failed:', insertError?.message)
+        // 保存失敗しても採点結果は返す（studentIdはnullのまま）
+      } else {
+        studentId = newStudent.id
+      }
+    }
+
+    // 回答を保存（studentIdがあれば保存、なくてもOK）
+    if (studentId) {
+      const { error: answerError } = await supabase.from('answers').insert({
+        quiz_id,
+        student_id: studentId,
+        student_name,
+        student_number,
+        answers,
+        score,
+        total_points: totalPoints,
+        grading_details: gradingDetails,
+      })
+      if (answerError) {
+        console.error('Answer save error:', answerError.message)
+      }
+    }
+  } catch (dbError) {
+    // DB保存失敗は無視してスコアだけ返す
+    console.error('Database error (non-fatal):', dbError)
   }
 
   return NextResponse.json({ score, total_points: totalPoints, grading_details: gradingDetails })
