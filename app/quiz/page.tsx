@@ -127,13 +127,14 @@ export default function QuizPage() {
   const [gradingDetails, setGradingDetails] = useState<GradingDetail[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const supabase = createClient()
 
   const handleCodeSubmit = async () => {
     if (code.length !== 4) { setError('4桁のコードを入力してください'); return }
     setLoading(true)
     setError('')
 
+    // createClient() はブラウザのイベントハンドラ内でのみ呼び出す（SSR回避）
+    const supabase = createClient()
     const { data, error: dbError } = await supabase
       .from('quizzes')
       .select('*')
