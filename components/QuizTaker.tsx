@@ -142,7 +142,7 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
       if (question.type === 'calculation') {
         finalAnswers[String(question.id)] = {
           type: 'calculation',
-          blanks: answers[question.id] ?? {},
+          blanks: answers[String(question.id)] ?? {},
         }
       }
     })
@@ -267,44 +267,43 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
           </div>
         )}
 
-        {/* 計算問題 ― answers[question.id][blank.position] で直接管理 */}
+        {/* 計算問題 ― answers[String(question.id)][blank.position] で直接管理 */}
         {q.type === 'calculation' && (
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
             {/* 簿記表あり */}
             {q.table_data && (
               <QuizTable
                 data={q.table_data}
-                blanks={answers[q.id] ?? {}}
+                blanks={answers[String(q.id)] ?? {}}
                 onInput={(pos, val) => {
                   setAnswers(prev => ({
                     ...prev,
-                    [q.id]: { ...(prev[q.id] || {}), [pos]: val },
+                    [String(q.id)]: { ...(prev[String(q.id)] || {}), [pos]: val },
                   }))
                 }}
                 blankDefs={q.blanks ?? []}
               />
             )}
-            {/* 表なし：通常空欄入力 */}
-            {!q.table_data && (q.blanks ?? []).length > 0 && (
+            {/* 表なし・空欄定義あり：通常空欄入力 */}
+            {!q.table_data && Array.isArray(q.blanks) && q.blanks.length > 0 && (
               <>
                 <h3 className="font-medium text-gray-700 text-sm">空欄を埋めてください</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {(q.blanks ?? []).map(blank => (
+                  {q.blanks.map(blank => (
                     <div key={blank.position} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ fontWeight: 'bold', color: '#1d4ed8', minWidth: '24px' }}>
                         {blank.position}
                       </span>
                       <input
-                        key={blank.position}
                         type="text"
                         inputMode="numeric"
-                        value={answers[q.id]?.[blank.position] ?? ''}
+                        value={answers[String(q.id)]?.[blank.position] ?? ''}
                         onChange={(e) => {
                           const val = e.target.value
                           setAnswers(prev => ({
                             ...prev,
-                            [q.id]: {
-                              ...(prev[q.id] || {}),
+                            [String(q.id)]: {
+                              ...(prev[String(q.id)] || {}),
                               [blank.position]: val,
                             },
                           }))
@@ -318,6 +317,26 @@ export default function QuizTaker({ quiz, accountList, onSubmit, loading }: Prop
                     </div>
                   ))}
                 </div>
+              </>
+            )}
+            {/* 表なし・空欄定義なし：フォールバック入力欄 */}
+            {!q.table_data && (!Array.isArray(q.blanks) || q.blanks.length === 0) && (
+              <>
+                <h3 className="font-medium text-gray-700 text-sm">計算結果を入力してください</h3>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={answers[String(q.id)]?.['①'] ?? ''}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setAnswers(prev => ({
+                      ...prev,
+                      [String(q.id)]: { ...(prev[String(q.id)] || {}), '①': val },
+                    }))
+                  }}
+                  placeholder="答えを入力"
+                  style={{ border: '2px solid #333', padding: '12px', fontSize: '16px', width: '100%', backgroundColor: 'white', borderRadius: '6px' }}
+                />
               </>
             )}
           </div>
