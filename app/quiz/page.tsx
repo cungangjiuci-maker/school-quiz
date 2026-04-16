@@ -152,6 +152,7 @@ export default function QuizPage() {
   const [gradingDetails, setGradingDetails] = useState<GradingDetail[]>([])
   const [error, setError] = useState('')
   const [submitError, setSubmitError] = useState('')
+  const [saveError, setSaveError] = useState('')
   const [loading, setLoading] = useState(false)
 
   // 4桁コードでテストを取得（サーバーサイドAPI経由）
@@ -233,6 +234,10 @@ export default function QuizPage() {
       const data = await res.json()
       setScore(data.score ?? 0)
       setGradingDetails(Array.isArray(data.grading_details) ? data.grading_details : [])
+      if (data.save_error) {
+        setSaveError(data.save_error)
+        console.warn('[handleSubmit] 保存エラー:', data.save_error)
+      }
       setPhase('result')
     } catch (e) {
       setSubmitError('採点中にエラーが発生しました。もう一度「提出する」を押してください。')
@@ -346,6 +351,14 @@ export default function QuizPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
         <div className="max-w-2xl mx-auto">
+          {saveError && (
+            <div className="bg-red-50 border border-red-300 rounded-xl p-4 mb-4 text-sm text-red-800">
+              <p className="font-bold mb-1">回答がサーバーに保存されませんでした</p>
+              <p>{saveError}</p>
+              <p className="mt-1 text-xs text-red-600">先生にこの画面を見せてください（RLSポリシーの設定が必要な場合があります）</p>
+            </div>
+          )}
+
           <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
             <h2 className="text-xl font-bold text-center text-gray-900 mb-1">{quiz.title} 結果</h2>
             <p className="text-center text-gray-500 text-sm mb-6">{studentNumber}番 {studentName}</p>

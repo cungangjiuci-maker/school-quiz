@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@supabase/supabase-js'
 import { Question, StudentAnswer, GradingDetail, JournalEntryAnswer } from '@/types'
+
+// Cookie依存のセッションを使わず、anonキーで直接クライアントを作成する。
+// これにより先生のPCセッションの有無に関わらず、常にanonロールで動作する。
+function createSupabaseClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
 
 function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail {
   // 【診断ログ】採点対象の問題データを出力
@@ -156,8 +165,9 @@ export async function POST(request: NextRequest) {
   const totalPoints = questions.reduce((sum: number, q: Question) => sum + q.points, 0)
 
   // Supabaseへの保存（失敗しても採点結果は返す）
+  let saveError: string | null = null
   try {
-    const supabase = await createClient()
+    const supabase = createSupabaseClient()
 
     // 生徒を作成または取得
     let studentId: string | null = null
@@ -168,12 +178,14 @@ export async function POST(request: NextRequest) {
       .eq('name', student_name)
       .single()
 
-    if (findError) {
-      console.log('Student lookup failed (may not exist yet):', findError.message)
+    if (findError && findError.code !== 'PGRST116') {
+      // PGRST116 = "no rows found" は正常（まだ登録されていない生徒）
+      console.error('[submit-quiz] Student lookup error:', findError.code, findError.message)
     }
 
     if (existingStudent) {
       studentId = existingStudent.id
+      console.log('[submit-quiz] 既存生徒を取得:', studentId)
     } else {
       const { data: newStudent, error: insertError } = await supabase
         .from('students')
@@ -182,14 +194,16 @@ export async function POST(request: NextRequest) {
         .single()
 
       if (insertError || !newStudent) {
-        console.error('Student insert failed:', insertError?.message)
-        // 保存失敗しても採点結果は返す（studentIdはnullのまま）
+        const msg = insertError?.message ?? '生徒の登録に失敗しました'
+        console.error('[submit-quiz] Student insert failed:', insertError?.code, msg)
+        saveError = `生徒登録エラー: ${msg}`
       } else {
         studentId = newStudent.id
+        console.log('[submit-quiz] 新規生徒を登録:', studentId)
       }
     }
 
-    // 回答を保存（studentIdがあれば保存、なくてもOK）
+    // 回答を保存（studentIdがあれば保存）
     if (studentId) {
       const { error: answerError } = await supabase.from('answers').insert({
         quiz_id,
@@ -202,13 +216,29 @@ export async function POST(request: NextRequest) {
         grading_details: gradingDetails,
       })
       if (answerError) {
-        console.error('Answer save error:', answerError.message)
+        const msg = answerError.message
+        console.error('[submit-quiz] Answer insert failed:', answerError.code, msg)
+        saveError = `回答保存エラー: ${msg}`
+      } else {
+        console.log('[submit-quiz] 回答を保存しました (student_id:', studentId, ')')
       }
+    } else if (!saveError) {
+      saveError = '生徒IDが取得できなかったため回答を保存できませんでした'
     }
   } catch (dbError) {
-    // DB保存失敗は無視してスコアだけ返す
-    console.error('Database error (non-fatal):', dbError)
+    const msg = dbError instanceof Error ? dbError.message : String(dbError)
+    console.error('[submit-quiz] Database error:', msg)
+    saveError = `データベースエラー: ${msg}`
   }
 
-  return NextResponse.json({ score, total_points: totalPoints, grading_details: gradingDetails })
+  if (saveError) {
+    console.warn('[submit-quiz] 保存失敗（採点結果は返します）:', saveError)
+  }
+
+  return NextResponse.json({
+    score,
+    total_points: totalPoints,
+    grading_details: gradingDetails,
+    save_error: saveError,
+  })
 }
