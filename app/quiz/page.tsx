@@ -153,6 +153,7 @@ export default function QuizPage() {
   const [error, setError] = useState('')
   const [submitError, setSubmitError] = useState('')
   const [saveError, setSaveError] = useState('')
+  const [saveDebug, setSaveDebug] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(false)
 
   // 4桁コードでテストを取得（サーバーサイドAPI経由）
@@ -237,6 +238,10 @@ export default function QuizPage() {
       if (data.save_error) {
         setSaveError(data.save_error)
         console.warn('[handleSubmit] 保存エラー:', data.save_error)
+      }
+      if (data.save_debug) {
+        setSaveDebug(data.save_debug)
+        console.log('[handleSubmit] 保存デバッグ情報:', JSON.stringify(data.save_debug))
       }
       setPhase('result')
     } catch (e) {
@@ -354,8 +359,15 @@ export default function QuizPage() {
           {saveError && (
             <div className="bg-red-50 border border-red-300 rounded-xl p-4 mb-4 text-sm text-red-800">
               <p className="font-bold mb-1">回答がサーバーに保存されませんでした</p>
-              <p>{saveError}</p>
-              <p className="mt-1 text-xs text-red-600">先生にこの画面を見せてください（RLSポリシーの設定が必要な場合があります）</p>
+              <p className="mb-2">{saveError}</p>
+              {saveDebug && (
+                <details className="text-xs text-red-700 mt-2">
+                  <summary className="cursor-pointer font-medium">デバッグ情報（先生に見せてください）</summary>
+                  <pre className="mt-1 bg-red-100 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+                    {JSON.stringify(saveDebug, null, 2)}
+                  </pre>
+                </details>
+              )}
             </div>
           )}
 
