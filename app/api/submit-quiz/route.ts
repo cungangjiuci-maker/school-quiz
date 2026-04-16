@@ -177,67 +177,91 @@ export async function POST(request: NextRequest) {
     const supabase = createSupabaseClient()
     console.log('[submit-quiz] Supabase クライアント初期化完了, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(0, 30))
 
-    // ---- students: upsert（SELECT→INSERT の非アトミックな2段階をやめ、upsert に一本化）----
-    // student_number を onConflict キーにすることで「同じ生徒番号なら上書き」とする。
-    // students テーブルに student_number の unique constraint が必要。
+    // ---- students: まず SELECT で検索、なければ INSERT ----
+    // upsert は students テーブルに unique constraint がないと動作しないため、
+    // SELECT → INSERT の2段階方式に変更する。
     let studentId: string | null = null
 
-    const { data: upsertedStudent, error: upsertError } = await supabase
+    // Step 1: student_number + name で既存生徒を検索
+    const { data: existingStudent, error: selectError } = await supabase
       .from('students')
-      .upsert(
-        { name: student_name, student_number },
-        { onConflict: 'student_number', ignoreDuplicates: false }
-      )
       .select('id')
-      .single()
+      .eq('student_number', student_number)
+      .eq('name', student_name)
+      .maybeSingle()
 
-    if (upsertError) {
-      console.error('[submit-quiz] students upsert エラー:', JSON.stringify({
-        code: upsertError.code,
-        message: upsertError.message,
-        hint: (upsertError as { hint?: string }).hint,
-        details: (upsertError as { details?: string }).details,
+    if (selectError) {
+      console.error('[submit-quiz] students SELECT エラー:', JSON.stringify({
+        code: selectError.code,
+        message: selectError.message,
+        hint: (selectError as { hint?: string }).hint,
+        details: (selectError as { details?: string }).details,
       }))
-      saveDebug.students_upsert_error = {
-        code: upsertError.code,
-        message: upsertError.message,
-        hint: (upsertError as { hint?: string }).hint,
-        details: (upsertError as { details?: string }).details,
+      saveDebug.students_select_error = {
+        code: selectError.code,
+        message: selectError.message,
+        hint: (selectError as { hint?: string }).hint,
       }
-      // フォールバック: student_number のみで SELECT を試みる
-      const { data: fallbackStudent, error: selectError } = await supabase
-        .from('students')
-        .select('id')
-        .eq('student_number', student_number)
-        .maybeSingle()
-
-      if (selectError) {
-        console.error('[submit-quiz] students select フォールバックもエラー:', JSON.stringify({
-          code: selectError.code,
-          message: selectError.message,
-          hint: (selectError as { hint?: string }).hint,
-        }))
-        saveDebug.students_select_fallback_error = {
-          code: selectError.code,
-          message: selectError.message,
-        }
-      } else if (fallbackStudent) {
-        studentId = fallbackStudent.id
-        console.log('[submit-quiz] フォールバックで既存生徒を取得:', studentId)
-        saveDebug.students_result = 'fallback_select_success'
-      } else {
-        console.warn('[submit-quiz] 生徒が見つからず、student_id なしで answers を保存します')
-        saveDebug.students_result = 'not_found'
-      }
-    } else if (upsertedStudent) {
-      studentId = upsertedStudent.id
-      console.log('[submit-quiz] students upsert 成功, id:', studentId)
-      saveDebug.students_result = 'upsert_success'
+    } else if (existingStudent) {
+      studentId = existingStudent.id
+      console.log('[submit-quiz] 既存生徒を取得:', studentId)
+      saveDebug.students_result = 'select_found'
     }
 
-    // ---- answers: insert（studentId が取れなくても保存を試みる）----
+    // Step 2: 見つからなかった場合は INSERT で新規作成
+    if (!studentId) {
+      const { data: newStudent, error: insertError } = await supabase
+        .from('students')
+        .insert({ name: student_name, student_number })
+        .select('id')
+        .single()
+
+      if (insertError) {
+        console.error('[submit-quiz] students INSERT エラー:', JSON.stringify({
+          code: insertError.code,
+          message: insertError.message,
+          hint: (insertError as { hint?: string }).hint,
+          details: (insertError as { details?: string }).details,
+        }))
+        saveDebug.students_insert_error = {
+          code: insertError.code,
+          message: insertError.message,
+          hint: (insertError as { hint?: string }).hint,
+          details: (insertError as { details?: string }).details,
+        }
+        // INSERT が重複エラー(23505)の場合、student_number のみで再 SELECT を試みる
+        if (insertError.code === '23505') {
+          const { data: retryStudent, error: retryError } = await supabase
+            .from('students')
+            .select('id')
+            .eq('student_number', student_number)
+            .maybeSingle()
+          if (!retryError && retryStudent) {
+            studentId = retryStudent.id
+            console.log('[submit-quiz] 重複INSERT後の再SELECT で生徒を取得:', studentId)
+            saveDebug.students_result = 'insert_conflict_retry_select'
+          } else {
+            saveDebug.students_retry_error = retryError ? { code: retryError.code, message: retryError.message } : 'not_found'
+          }
+        }
+      } else if (newStudent) {
+        studentId = newStudent.id
+        console.log('[submit-quiz] 新規生徒を登録:', studentId)
+        saveDebug.students_result = 'insert_success'
+      }
+    }
+
+    if (!studentId) {
+      const msg = 'student_id を取得できませんでした（students テーブルの SELECT/INSERT が失敗しています）'
+      console.error('[submit-quiz]', msg)
+      saveError = msg
+      saveDebug.students_result = saveDebug.students_result ?? 'failed'
+    }
+
+    // ---- answers: insert（studentId が必須）----
     const answerPayload: Record<string, unknown> = {
       quiz_id,
+      student_id: studentId,   // NOT NULL なので必ず設定（null の場合は上で saveError をセット済み）
       student_name,
       student_number,
       answers,
@@ -245,39 +269,41 @@ export async function POST(request: NextRequest) {
       total_points: totalPoints,
       grading_details: gradingDetails,
     }
-    // student_id は取れた場合のみ付加（NULL 許容の場合はそのまま保存）
-    if (studentId) {
-      answerPayload.student_id = studentId
-    }
 
-    console.log('[submit-quiz] answers insert 試行:', JSON.stringify({
-      quiz_id,
-      student_name,
-      student_number,
-      student_id: studentId,
-      score,
-      total_points: totalPoints,
-    }))
-
-    const { error: answerError } = await supabase.from('answers').insert(answerPayload)
-
-    if (answerError) {
-      console.error('[submit-quiz] answers insert エラー:', JSON.stringify({
-        code: answerError.code,
-        message: answerError.message,
-        hint: (answerError as { hint?: string }).hint,
-        details: (answerError as { details?: string }).details,
-      }))
-      saveError = `回答保存エラー [${answerError.code}]: ${answerError.message}`
-      saveDebug.answers_insert_error = {
-        code: answerError.code,
-        message: answerError.message,
-        hint: (answerError as { hint?: string }).hint,
-        details: (answerError as { details?: string }).details,
-      }
+    // studentId が取れなかった場合は NOT NULL 違反になるためスキップ
+    if (!studentId) {
+      console.error('[submit-quiz] studentId が null のため answers insert をスキップします')
+      saveDebug.answers_result = 'skipped_no_student_id'
     } else {
-      console.log('[submit-quiz] answers insert 成功 (student_id:', studentId, ')')
-      saveDebug.answers_result = 'insert_success'
+      console.log('[submit-quiz] answers insert 試行:', JSON.stringify({
+        quiz_id,
+        student_name,
+        student_number,
+        student_id: studentId,
+        score,
+        total_points: totalPoints,
+      }))
+
+      const { error: answerError } = await supabase.from('answers').insert(answerPayload)
+
+      if (answerError) {
+        console.error('[submit-quiz] answers insert エラー:', JSON.stringify({
+          code: answerError.code,
+          message: answerError.message,
+          hint: (answerError as { hint?: string }).hint,
+          details: (answerError as { details?: string }).details,
+        }))
+        saveError = `回答保存エラー [${answerError.code}]: ${answerError.message}`
+        saveDebug.answers_insert_error = {
+          code: answerError.code,
+          message: answerError.message,
+          hint: (answerError as { hint?: string }).hint,
+          details: (answerError as { details?: string }).details,
+        }
+      } else {
+        console.log('[submit-quiz] answers insert 成功 (student_id:', studentId, ')')
+        saveDebug.answers_result = 'insert_success'
+      }
     }
   } catch (dbError) {
     const msg = dbError instanceof Error ? dbError.message : String(dbError)
