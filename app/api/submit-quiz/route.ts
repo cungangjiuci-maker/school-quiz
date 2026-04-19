@@ -70,7 +70,7 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
       const userAnswer = userBlanks[blank.position]
       console.log(`[gradeQuestion] id=${question.id} 空欄${blank.position}: 正解=${blank.answer}, 生徒回答="${userAnswer}", parseInt=${parseInt(userAnswer)}`)
       if (blank.type === 'number') {
-        if (parseInt(userAnswer) === blank.answer) correctCount++
+        if (parseInt(String(userAnswer || '').replace(/,/g, '')) === blank.answer) correctCount++
       } else {
         if (userAnswer?.trim() === String(blank.answer).trim()) correctCount++
       }
