@@ -392,7 +392,7 @@ export default function QuizPage() {
 
           <div className="space-y-4">
             {gradingDetails.map((detail, index) => {
-              const q = quiz.questions.find(q => q.id === detail.question_id)
+              const q = quiz.questions.find(q => String(q.id) === String(detail.question_id))
               return (
                 <div key={index} className={`bg-white rounded-xl border-l-4 p-4 ${detail.is_correct ? 'border-green-500' : 'border-red-500'}`}>
                   <div className="flex items-center justify-between mb-2">
