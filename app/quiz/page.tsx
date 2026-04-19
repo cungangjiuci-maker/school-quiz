@@ -91,7 +91,7 @@ function StudentAnswerDisplay({ question, studentAnswer }: { question: Question;
     if (!ans) return <p className="text-xs text-gray-500">（未回答）</p>
 
     if (question.type === 'multiple_choice' && ans.type === 'multiple_choice') {
-      const idx = ans.selected
+      const idx = ans.selected ?? -1
       const choice = question.choices?.[idx]
       if (choice == null) return <p className="text-xs text-gray-500">（未回答）</p>
       return <p className="text-xs text-gray-700">{idx + 1}. {choice}</p>
