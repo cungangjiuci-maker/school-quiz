@@ -402,7 +402,7 @@ export default function QuizPage() {
                   </div>
                   <p className="text-sm text-gray-600 mb-2">{q?.question_text}</p>
                   {q && (
-                    <div className="bg-red-50 rounded-lg p-3">
+                    <div className="bg-gray-50 rounded-lg p-3 mb-2">">
                       <p className="text-red-700 font-medium text-xs mb-2">正解:</p>
                       <CorrectAnswerDisplay question={q} correctAnswer={detail.correct_answer} />
                     </div>
