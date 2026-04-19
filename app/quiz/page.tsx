@@ -133,7 +133,7 @@ function CorrectAnswerTable({ tableData, blanks }: { tableData: TableData; blank
   )
 }
 
-const ACCOUNT_LIST = [
+function StudentAnswerDisplay({ question, studentAnswer }: { question: Question; studentAnswer: unknown }) {
   '材料', '仕掛品', '製品', '製造間接費', '賃金', '給料',
   '減価償却費', '売上', '売上原価', '現金', '当座預金',
   '買掛金', '売掛金', '前払費用', '未払費用', '修繕費',
@@ -401,7 +401,7 @@ export default function QuizPage() {
                     </div>
                   </div>
                   <p className="text-sm text-gray-600 mb-2">{q?.question_text}</p>
-                  {!detail.is_correct && q && (
+                  {q && (
                     <div className="bg-red-50 rounded-lg p-3">
                       <p className="text-red-700 font-medium text-xs mb-2">正解:</p>
                       <CorrectAnswerDisplay question={q} correctAnswer={detail.correct_answer} />
