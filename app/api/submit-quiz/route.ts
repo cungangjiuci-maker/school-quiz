@@ -2,6 +2,53 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { Question, StudentAnswer, GradingDetail, JournalEntryAnswer } from '@/types'
 
+/**
+ * 金額を正規化して整数に変換する。
+ * 以下はすべて数値の 0 として扱う（採点で「空欄」と同一視）:
+ *   null / undefined / "" / "0" / 0 / 全角数字 / 全角カンマ / 半角カンマ付き
+ */
+function normalizeAmount(val: number | string | undefined | null): number {
+  if (val === null || val === undefined) return 0
+  if (typeof val === 'number') return isNaN(val) ? 0 : val
+  const s = val.trim()
+  if (s === '' || s === '0') return 0          // 空欄・"0" を明示的に短絡
+  const normalized = s
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[，,]/g, '')
+  const n = parseInt(normalized)
+  return isNaN(n) ? 0 : n
+}
+
+/**
+ * 勘定科目を正規化する。
+ * null / undefined / "" はすべて空文字列（空欄）として同一視する。
+ */
+function normalizeAccount(val: string | undefined | null): string {
+  return val?.trim() ?? ''
+}
+
+// 計算問題の string 入力専用（normalizeAmount の string 版エイリアス）
+function parseAmount(val: string | undefined | null): number {
+  return normalizeAmount(val)
+}
+
+/**
+ * 計算問題の空欄回答を数値に正規化する。
+ * 以下をすべて同じ数値として正解判定できるようにする：
+ *   半角: 1000  /  半角カンマ: 1,000
+ *   全角: １０００  /  全角カンマ: １，０００
+ */
+function normalizeNumber(val: string | undefined | null): number {
+  if (val === null || val === undefined) return 0
+  const s = String(val).trim()
+  if (s === '') return 0
+  const normalized = s
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[，,]/g, '')
+  const n = parseInt(normalized, 10)
+  return isNaN(n) ? 0 : n
+}
+
 // Cookie依存のセッションを使わず、anonキーで直接クライアントを作成する。
 // これにより先生のPCセッションの有無に関わらず、常にanonロールで動作する。
 function createSupabaseClient() {
@@ -31,16 +78,58 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
   if (question.type === 'journal_entry' && answer.type === 'journal_entry') {
     const rows = answer.rows || []
     const rawAnswer = question.answer as JournalEntryAnswer | JournalEntryAnswer[] | undefined
-    const correctAnswers: JournalEntryAnswer[] = Array.isArray(rawAnswer) ? rawAnswer : rawAnswer ? [rawAnswer] : []
+    const allCorrectAnswers: JournalEntryAnswer[] = Array.isArray(rawAnswer) ? rawAnswer : rawAnswer ? [rawAnswer] : []
 
+    // ── フィラー行の除外 ────────────────────────────────────────
+    // 借方・貸方どちらの金額も 0（空欄相当）の行は照合不要なフィラー行として除く。
+    // AI が生成した {debit_amount: 0, credit_amount: 0} や
+    // Supabase から文字列で来た {debit_amount: "0", credit_amount: "0"} も除外できる。
+    const correctAnswers = allCorrectAnswers.filter(c =>
+      normalizeAmount(c.debit_amount) !== 0 || normalizeAmount(c.credit_amount) !== 0
+    )
+
+    // ── 診断ログ ────────────────────────────────────────────────
+    console.log(`[journal_entry] 問${question.id} 正解行(フィラー除外後):`,
+      JSON.stringify(correctAnswers.map(c => ({
+        debit:  normalizeAccount(c.debit_account),
+        dAmt:   normalizeAmount(c.debit_amount),
+        credit: normalizeAccount(c.credit_account),
+        cAmt:   normalizeAmount(c.credit_amount),
+      })))
+    )
+    console.log(`[journal_entry] 問${question.id} 生徒の行:`,
+      JSON.stringify(rows.map(r => ({
+        debit:  normalizeAccount(r.debit_account),
+        dAmt:   normalizeAmount(r.debit_amount),
+        credit: normalizeAccount(r.credit_account),
+        cAmt:   normalizeAmount(r.credit_amount),
+      })))
+    )
+
+    // ── 行の順序に依存しない一致判定（every + some） ──────────────
+    // 正解の各行について、生徒の行の中に一致するものが1つでもあればOK。
+    // 金額比較: normalizeAmount で両辺を正規化 → null/""/0/"0" はすべて 0 として同一視
+    // 科目比較: normalizeAccount で両辺を正規化 → null/undefined/"" はすべて空欄として同一視
     const isCorrect = correctAnswers.length > 0 && correctAnswers.every(correct => {
-      return rows.some(row =>
-        row.debit_account === correct.debit_account &&
-        parseInt(row.debit_amount) === correct.debit_amount &&
-        row.credit_account === correct.credit_account &&
-        parseInt(row.credit_amount) === correct.credit_amount
+      const cDebitAmt   = normalizeAmount(correct.debit_amount)
+      const cCreditAmt  = normalizeAmount(correct.credit_amount)
+      const cDebitAcc   = normalizeAccount(correct.debit_account)
+      const cCreditAcc  = normalizeAccount(correct.credit_account)
+
+      const matched = rows.some(row =>
+        normalizeAccount(row.debit_account)  === cDebitAcc  &&
+        normalizeAccount(row.credit_account) === cCreditAcc &&
+        normalizeAmount(row.debit_amount)    === cDebitAmt  &&
+        normalizeAmount(row.credit_amount)   === cCreditAmt
       )
+
+      if (!matched) {
+        console.log(`[journal_entry] 問${question.id} 不一致: 正解行 {debit:${cDebitAcc} ${cDebitAmt}, credit:${cCreditAcc} ${cCreditAmt}} に対応する生徒行なし`)
+      }
+      return matched
     })
+
+    console.log(`[journal_entry] 問${question.id} 結果: isCorrect=${isCorrect}`)
 
     return {
       ...base,
@@ -68,9 +157,11 @@ function gradeQuestion(question: Question, answer: StudentAnswer): GradingDetail
 
     question.blanks.forEach(blank => {
       const userAnswer = userBlanks[blank.position]
-      console.log(`[gradeQuestion] id=${question.id} 空欄${blank.position}: 正解=${blank.answer}, 生徒回答="${userAnswer}", parseInt=${parseInt(userAnswer)}`)
+      const normalizedUser = normalizeNumber(String(userAnswer ?? ''))
+      const normalizedCorrect = Number(blank.answer)
+      console.log(`[gradeQuestion] id=${question.id} 空欄${blank.position}: 正解=${normalizedCorrect}, 生徒回答="${userAnswer}" → 正規化後=${normalizedUser}`)
       if (blank.type === 'number') {
-        if (parseInt(String(userAnswer || '').replace(/,/g, '')) === blank.answer) correctCount++
+        if (normalizedUser === normalizedCorrect) correctCount++
       } else {
         if (userAnswer?.trim() === String(blank.answer).trim()) correctCount++
       }
