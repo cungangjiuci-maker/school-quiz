@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
-import { GenerateQuizRequest } from '@/types'
+import { GenerateQuizRequest, JournalEntryAnswer, QuestionType } from '@/types'
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -15,16 +15,104 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
   }
 
-  const body: GenerateQuizRequest = await request.json()
-  const { content, difficulty, estimated_minutes, question_types, notes } = body
+  let body: GenerateQuizRequest
+  try {
+    body = await request.json()
+  } catch (parseErr) {
+    console.error('[generate-quiz] リクエストボディの JSON parse 失敗:', parseErr)
+    return NextResponse.json({ error: 'リクエストの解析に失敗しました。ファイルが大きすぎる可能性があります。' }, { status: 400 })
+  }
+
+  const { difficulty, estimated_minutes, question_types, notes } = body
+
+  // サーバー側でも念のため 15,000 字に制限（クライアント・extract-text 側で切り詰め済みのはずだが二重防護）
+  const MAX_CONTENT_CHARS = 15000
+  const content = typeof body.content === 'string' && body.content.length > MAX_CONTENT_CHARS
+    ? (() => {
+        console.warn(`[generate-quiz] content を切り詰め: ${body.content.length} → ${MAX_CONTENT_CHARS} 文字`)
+        return body.content.slice(0, MAX_CONTENT_CHARS)
+      })()
+    : (body.content ?? '')
 
   const difficultyLabel = { easy: 'やさしめ', normal: '標準', hard: '難しめ' }[difficulty]
-  const typeLabels = question_types.map(t => ({
+
+  const TYPE_LABEL: Record<QuestionType, string> = {
     journal_entry: '仕訳問題',
-    calculation: '計算問題',
+    calculation:   '計算問題',
     multiple_choice: '選択問題',
-    description: '語句記述問題',
-  }[t])).join('、')
+    description:   '語句記述問題',
+  }
+  const allTypes: QuestionType[] = ['journal_entry', 'calculation', 'multiple_choice', 'description']
+
+  // 選択済み・禁止タイプのラベルを生成
+  const allowedSet    = new Set(question_types)
+  const typeLabels    = question_types.map(t => TYPE_LABEL[t]).join('、')
+  const forbiddenTypes = allTypes.filter(t => !allowedSet.has(t))
+  const forbiddenLabel = forbiddenTypes.map(t => TYPE_LABEL[t]).join('、')
+
+  // 選択されたタイプに対応するJSONスキーマのサンプルのみ動的に生成する。
+  // 未選択タイプのサンプルをプロンプトに含めると、AIがそれを真似て
+  // 不要な問題タイプを出力することがあるため、ここで完全に除外する。
+  let exampleId = 1
+  const schemaExamples: string[] = []
+
+  if (allowedSet.has('journal_entry')) {
+    schemaExamples.push(`    {
+      "id": ${exampleId++},
+      "type": "journal_entry",
+      "question_text": "問題文（具体的な金額・条件を含む）",
+      "points": 4,
+      "answer": {
+        "debit_account": "仕掛品",
+        "debit_amount": 50000,
+        "credit_account": "材料",
+        "credit_amount": 50000
+      },
+      "account_suggestions": ["仕掛品", "材料", "製造間接費", "賃金", "買掛金"]
+    }`)
+  }
+  if (allowedSet.has('calculation')) {
+    schemaExamples.push(`    {
+      "id": ${exampleId++},
+      "type": "calculation",
+      "question_text": "問題文（資料のみ。表の空欄は①②③で示す）",
+      "points": 4,
+      "table_data": {
+        "title": "総合原価計算表（平均法）（単位：円）",
+        "headers": ["区分", "直接材料費", "加工費", "合計"],
+        "rows": [
+          {"label": "月初仕掛品原価", "values": ["xxx", "xxx", "xxx"]},
+          {"label": "当月製造費用", "values": ["xxx", "xxx", "xxx"]},
+          {"label": "合計", "values": ["xxx", "xxx", "xxx"]},
+          {"label": "月末仕掛品原価", "values": ["①", "②", "③"]},
+          {"label": "完成品原価", "values": ["④", "⑤", "xxx"]}
+        ]
+      },
+      "blanks": [
+        {"position": "①", "answer": 96000, "type": "number"},
+        {"position": "②", "answer": 14000, "type": "number"}
+      ]
+    }`)
+  }
+  if (allowedSet.has('multiple_choice')) {
+    schemaExamples.push(`    {
+      "id": ${exampleId++},
+      "type": "multiple_choice",
+      "question_text": "問題文",
+      "points": 2,
+      "choices": ["選択肢A","選択肢B","選択肢C","選択肢D"],
+      "answer": 0
+    }`)
+  }
+  if (allowedSet.has('description')) {
+    schemaExamples.push(`    {
+      "id": ${exampleId++},
+      "type": "description",
+      "question_text": "問題文",
+      "points": 2,
+      "keywords": ["キーワード1", "キーワード2"]
+    }`)
+  }
 
   const systemPrompt = `あなたは日商簿記2級（工業簿記）の専門家です。以下の簿記原則を厳守して小テストを作成してください。
 
@@ -79,6 +167,8 @@ JSON形式のみで出力し、余分な説明は不要です。`
   // ログ: Claudeに送るテキストを確認
   console.log('=== Claude API に送信するテキスト ===')
   console.log(`文字数: ${content.length}`)
+  console.log(`選択された問題タイプ: ${typeLabels}`)
+  console.log(`禁止問題タイプ: ${forbiddenLabel || 'なし'}`)
   console.log('--- テキスト先頭300文字 ---')
   console.log(content.substring(0, 300))
   console.log('===================================')
@@ -91,69 +181,34 @@ JSON形式のみで出力し、余分な説明は不要です。`
 - プリントに記載の数値・勘定科目・計算条件をそのまま使用すること
 - プリントの内容が不十分で問題が作れない場合は、その旨をerrorフィールドに記載すること
 
+【問題形式の制約 - 絶対厳守】
+使用できる問題形式: ${typeLabels} のみ
+${forbiddenLabel ? `使用禁止の問題形式（1問たりとも含めてはいけない）: ${forbiddenLabel}` : ''}
+questions 配列の全問題は上記の使用できる問題形式のみで構成すること。
+
 【設定】
 - 難易度: ${difficultyLabel}
 - 解答時間: ${estimated_minutes}分
-- 含める問題形式: ${typeLabels}
 - 特記事項: ${notes || 'なし'}
 
 【授業プリント内容】
 ${content}
 
-【出力JSONスキーマ】
+【出力JSONスキーマ（使用できる問題形式のみのサンプル）】
 {
   "title": "テストタイトル",
   "subject": "単元名",
   "estimated_minutes": ${estimated_minutes},
   "total_points": 10,
   "questions": [
-    {
-      "id": 1,
-      "type": "journal_entry",
-      "question_text": "問題文（具体的な金額・条件を含む）",
-      "points": 4,
-      "answer": {
-        "debit_account": "仕掛品",
-        "debit_amount": 50000,
-        "credit_account": "材料",
-        "credit_amount": 50000
-      }
-    },
-    {
-      "id": 2,
-      "type": "calculation",
-      "question_text": "問題文（資料のみ。表の空欄は①②③で示す）",
-      "points": 4,
-      "table_data": {
-        "title": "総合原価計算表（平均法）（単位：円）",
-        "headers": ["区分", "直接材料費", "加工費", "合計"],
-        "rows": [
-          {"label": "月初仕掛品原価", "values": ["xxx", "xxx", "xxx"]},
-          {"label": "当月製造費用", "values": ["xxx", "xxx", "xxx"]},
-          {"label": "合計", "values": ["xxx", "xxx", "xxx"]},
-          {"label": "月末仕掛品原価", "values": ["①", "②", "③"]},
-          {"label": "完成品原価", "values": ["④", "⑤", "xxx"]}
-        ]
-      },
-      "blanks": [
-        {"position": "①", "answer": 96000, "type": "number"},
-        {"position": "②", "answer": 14000, "type": "number"}
-      ]
-    },
-    {
-      "id": 3,
-      "type": "multiple_choice",
-      "question_text": "問題文",
-      "points": 2,
-      "choices": ["選択肢A","選択肢B","選択肢C","選択肢D"],
-      "answer": 0
-    }
+${schemaExamples.join(',\n')}
   ]
 }
 
 注意事項:
 - 仕訳問題は借方・貸方の合計金額が必ず一致すること（検算必須）
 - 複数行仕訳は answer を配列にする: [{"debit_account":"...","debit_amount":0,"credit_account":"...","credit_amount":0}]
+- 仕訳問題には必ず account_suggestions を含めること（授業プリントの内容から正解に近い勘定科目を5〜6個選ぶ）
 - 計算問題は必ず blanks 配列を含めること（これがないと採点できない・絶対省略禁止）
 - 表を使う計算問題は table_data と blanks の両方を含めること
 - blanks の answer は必ず数値（number型）で設定すること
@@ -180,6 +235,54 @@ ${content}
     }
 
     const quizData = JSON.parse(jsonMatch[0])
+
+    // ── 未選択タイプの問題を除外（AIが指示を無視した場合の確実な保険）────
+    if (Array.isArray(quizData.questions)) {
+      const before = quizData.questions.length
+      quizData.questions = quizData.questions.filter(
+        (q: { type: string }) => allowedSet.has(q.type as QuestionType)
+      )
+      const removed = before - quizData.questions.length
+      if (removed > 0) {
+        console.warn(`[generate-quiz] 未選択タイプの問題を ${removed} 問除外しました（選択タイプ: ${typeLabels}）`)
+      }
+      if (quizData.questions.length === 0) {
+        return NextResponse.json(
+          { error: `選択した問題形式（${typeLabels}）の問題が生成されませんでした。再度「問題を生成する」を押してください。` },
+          { status: 422 }
+        )
+      }
+      // 合計点数をフィルタリング後の問題に合わせて再計算
+      quizData.total_points = quizData.questions.reduce(
+        (s: number, q: { points: number }) => s + (q.points || 0), 0
+      )
+    }
+
+    console.log('[generate-quiz] 受信したquestion_types:', question_types)
+    console.log('[generate-quiz] allowedSet:', Array.from(allowedSet))
+    console.log('[generate-quiz] フィルタリング後の問題数:', quizData.questions?.length)
+    console.log('[generate-quiz] フィルタリング後の問題タイプ:', quizData.questions?.map((q: {type: string}) => q.type))
+
+    // ── 仕訳問題の借方・貸方合計一致チェック（⑦）──────────────────────
+    if (Array.isArray(quizData.questions)) {
+      const journalErrors: string[] = []
+      quizData.questions.forEach((q: { id: number; type: string; answer?: unknown }) => {
+        if (q.type !== 'journal_entry') return
+        const raw = q.answer
+        const answers: JournalEntryAnswer[] = Array.isArray(raw) ? raw as JournalEntryAnswer[] : raw ? [raw as JournalEntryAnswer] : []
+        const totalDebit = answers.reduce((s, a) => s + (Number(a.debit_amount) || 0), 0)
+        const totalCredit = answers.reduce((s, a) => s + (Number(a.credit_amount) || 0), 0)
+        if (totalDebit !== totalCredit) {
+          journalErrors.push(`問${q.id}: 借方合計 ${totalDebit}円 ≠ 貸方合計 ${totalCredit}円`)
+        }
+      })
+      if (journalErrors.length > 0) {
+        return NextResponse.json(
+          { error: `仕訳の会計規則エラー（借方≠貸方）:\n${journalErrors.join('\n')}\n\n「問題を生成する」を再度押して再生成してください。` },
+          { status: 422 }
+        )
+      }
+    }
 
     // バリデーション：計算問題に blanks が含まれているか確認・補完
     if (Array.isArray(quizData.questions)) {
